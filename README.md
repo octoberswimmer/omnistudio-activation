@@ -12,3 +12,17 @@ in using `force login` or set your active user using `force active -a
 ```
 $ go install github.com/octoberswimmer/omnistudio-activation
 ```
+
+## Debugging
+
+To run the application in a non-headless browser:
+
+```
+$ env HEADLESS=false go run main.go
+```
+
+Enable debug logging by setting the `DEBUG` environment variable to true.
+
+```
+$ env DEBUG=true go run main.go
+```
