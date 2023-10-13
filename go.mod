@@ -1,6 +1,6 @@
 module github.com/octoberswimmer/omnistudio-activation
 
-go 1.21.3
+go 1.21
 
 require (
 	github.com/ForceCLI/force v1.0.4
