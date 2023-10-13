@@ -125,31 +125,35 @@ func compileOSAndFlexCards() {
 		var currentStatus string
 
 		timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-		if err := chromedp.Run(timeoutCtx,
-			chromedp.Navigate(omniScriptDisignerpageLink),
-		); err != nil {
-			log.Fatalf("Failed loading OmniScript compilation page: %v", err)
-		}
 	SCRIPT:
 		for {
 			if err := chromedp.Run(timeoutCtx,
-				chromedp.WaitVisible("#compiler-message"),
-				chromedp.Text("#compiler-message", &currentStatus),
+				chromedp.Navigate(omniScriptDisignerpageLink),
 			); err != nil {
-				log.Fatalf("Failed checking OmniScript compilation status: %v", err)
+				log.Fatalf("Failed loading OmniScript compilation page: %v", err)
 			}
-			switch {
-			case currentStatus == "DONE":
-				log.Println("LWC Activated successfully")
-				break SCRIPT
-			case strings.HasPrefix(currentStatus, "ERROR: No MODULE named markup"):
-				log.Println("Missing Custom LWC - " + currentStatus)
-			case strings.HasPrefix(currentStatus, "ERROR"):
-				log.Println("Error Activating LWC - " + currentStatus)
-			default:
-				log.Println("Status: " + currentStatus)
+		STATUS:
+			for {
+				if err := chromedp.Run(timeoutCtx,
+					chromedp.WaitVisible("#compiler-message"),
+					chromedp.Text("#compiler-message", &currentStatus),
+				); err != nil {
+					log.Fatalf("Failed checking OmniScript compilation status: %v", err)
+				}
+				switch {
+				case currentStatus == "DONE":
+					log.Println("LWC Activated successfully")
+					break SCRIPT
+				case strings.HasPrefix(currentStatus, "ERROR: No MODULE named markup"):
+					log.Println("Missing Custom LWC - " + currentStatus)
+				case strings.HasPrefix(currentStatus, "ERROR"):
+					log.Println("Error Activating LWC - " + currentStatus)
+					break STATUS
+				default:
+					log.Println("Status: " + currentStatus)
+				}
+				time.Sleep(2 * time.Second)
 			}
-			time.Sleep(2 * time.Second)
 		}
 		cancel()
 	}
