@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -94,7 +96,7 @@ func compileOSAndFlexCards() {
 	})
 
 	ch := make(chan struct{})
-	waitNetworkIdle := func(ctx context.Context) chromedp.Action {
+	waitNetworkIdle := func() chromedp.Action {
 		return chromedp.ActionFunc(func(ctx context.Context) error {
 			// Wait for the timer to expire indicating network has been idle for idleDuration
 			go func() {
@@ -108,12 +110,36 @@ func compileOSAndFlexCards() {
 		})
 	}
 
+	waitForUrl := func(expected string) chromedp.Action {
+		return chromedp.ActionFunc(func(ctx context.Context) error {
+			var currentURL string
+			for {
+				// Get current URL
+				if err := chromedp.Location(&currentURL).Do(ctx); err != nil {
+					return err
+				}
+				// Check if it matches the expected URL
+				u, err := url.Parse(currentURL)
+				if err != nil {
+					return fmt.Errorf("Could not parse URL, %s: %w", currentURL, err)
+				}
+
+				if strings.Contains(u.Path, expected) {
+					return nil
+				}
+				// If not, sleep for a while and then check again
+				log.Println("current URL", currentURL, "does not match expected", expected)
+				time.Sleep(100 * time.Millisecond)
+			}
+		})
+	}
+
 	// Timeout the entire browser session after 10 minutes
 	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	if err := chromedp.Run(timeoutCtx,
 		chromedp.Navigate(instanceUrl+"/secur/frontdoor.jsp?sid="+accessToken),
-		waitNetworkIdle(timeoutCtx),
+		waitNetworkIdle(),
 	); err != nil {
 		log.Fatalf("Failed navigating to login page: %v", err)
 	}
@@ -124,11 +150,13 @@ func compileOSAndFlexCards() {
 		log.Println("Loading", omniScriptDisignerpageLink)
 		var currentStatus string
 
-		timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		timeoutCtx, cancelParse := context.WithTimeout(ctx, 5*time.Minute)
+		loadTimeCtx, cancelLoad := context.WithTimeout(timeoutCtx, 30*time.Second)
 	SCRIPT:
 		for {
-			if err := chromedp.Run(timeoutCtx,
+			if err := chromedp.Run(loadTimeCtx,
 				chromedp.Navigate(omniScriptDisignerpageLink),
+				waitForUrl("OmniLwcCompile"),
 			); err != nil {
 				log.Fatalf("Failed loading OmniScript compilation page: %v", err)
 			}
@@ -155,7 +183,8 @@ func compileOSAndFlexCards() {
 				time.Sleep(2 * time.Second)
 			}
 		}
-		cancel()
+		cancelLoad()
+		cancelParse()
 	}
 
 	if len(flexCardIds) > 0 {
@@ -164,10 +193,12 @@ func compileOSAndFlexCards() {
 		log.Println("Loading", flexCardCompilePage)
 		var currentStatus, jsonError string
 
-		timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		timeoutCtx, cancelParse := context.WithTimeout(ctx, 5*time.Minute)
+		loadTimeCtx, cancelLoad := context.WithTimeout(timeoutCtx, 30*time.Second)
 		defer cancel()
-		if err := chromedp.Run(timeoutCtx,
+		if err := chromedp.Run(loadTimeCtx,
 			chromedp.Navigate(flexCardCompilePage),
+			waitForUrl("FlexCardCompilePage"),
 		); err != nil {
 			log.Fatalf("Failed loading Flex Card compilation page: %v", err)
 		}
@@ -192,6 +223,8 @@ func compileOSAndFlexCards() {
 			}
 			time.Sleep(2 * time.Second)
 		}
+		cancelLoad()
+		cancelParse()
 	}
 }
 
