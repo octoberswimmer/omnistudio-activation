@@ -17,10 +17,26 @@ import (
 
 const packageNamespace = "omnistudio__"
 
-func compileOSAndFlexCards() {
+func hasScope(session *force.Force, scope string) bool {
+	for _, s := range strings.Split(session.Credentials.Scope, " ") {
+		if strings.ToLower(s) == strings.ToLower(scope) {
+			return true
+		}
+	}
+	return false
+}
+
+func compileOSAndFlexCards() error {
 	session, err := force.ActiveForce()
 	if err != nil {
-		panic(err.Error())
+		return fmt.Errorf("Could not get session: %w", err)
+	}
+
+	if !hasScope(session, "web") {
+		return fmt.Errorf("Need web scope.  Have scopes: %s.  Check Connected App settings.", session.Credentials.Scope)
+	}
+	if !hasScope(session, "visualforce") {
+		return fmt.Errorf("Need visualforce scope.  Have scopes: %s.  Check Connected App settings.", session.Credentials.Scope)
 	}
 
 	instanceUrl := session.Credentials.InstanceUrl
@@ -29,7 +45,7 @@ func compileOSAndFlexCards() {
 	queryOmniscript := `SELECT Id, UniqueName FROM OmniProcess WHERE IsActive = true AND IsIntegrationProcedure = false`
 	result, err := session.Query(queryOmniscript)
 	if err != nil {
-		panic(err.Error())
+		return fmt.Errorf("Query for OmniScripts failed: %w", err)
 	}
 	var omniScriptIds []string
 	for _, record := range result.Records {
@@ -39,7 +55,7 @@ func compileOSAndFlexCards() {
 	queryFlexCard := `SELECT Id, UniqueName FROM OmniUiCard WHERE IsActive = true`
 	result, err = session.Query(queryFlexCard)
 	if err != nil {
-		panic(err.Error())
+		return fmt.Errorf("Query for FlexCards failed: %w", err)
 	}
 	var flexCardIds []string
 	for _, record := range result.Records {
@@ -63,15 +79,14 @@ func compileOSAndFlexCards() {
 			opts = append(opts, chromedp.IgnoreCertErrors)
 		}
 	}
+	opts = append(opts, chromedp.IgnoreCertErrors)
 
-	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	defer cancel()
+	allocCtx, _ := chromedp.NewExecAllocator(context.Background(), opts...)
 
-	ctx, cancel := chromedp.NewContext(
+	ctx, _ := chromedp.NewContext(
 		allocCtx,
 		chromedp.WithDebugf(logger),
 	)
-	defer cancel()
 
 	// Create a timer that waits for the network to be idle for idleDuration
 	idleDuration := 2 * time.Second
@@ -135,13 +150,13 @@ func compileOSAndFlexCards() {
 	}
 
 	// Timeout the entire browser session after 10 minutes
-	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-	defer cancel()
+	timeoutCtx, cancelBrowser := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancelBrowser()
 	if err := chromedp.Run(timeoutCtx,
 		chromedp.Navigate(instanceUrl+"/secur/frontdoor.jsp?sid="+accessToken),
 		waitNetworkIdle(),
 	); err != nil {
-		log.Fatalf("Failed navigating to login page: %v", err)
+		return fmt.Errorf("Failed navigating to login page: %w", err)
 	}
 
 	log.Printf("Activating OmmiScripts %+v\n", omniScriptIds)
@@ -151,14 +166,16 @@ func compileOSAndFlexCards() {
 		var currentStatus string
 
 		timeoutCtx, cancelParse := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancelParse()
 		loadTimeCtx, cancelLoad := context.WithTimeout(timeoutCtx, 30*time.Second)
+		defer cancelLoad()
 	SCRIPT:
 		for {
 			if err := chromedp.Run(loadTimeCtx,
 				chromedp.Navigate(omniScriptDisignerpageLink),
 				waitForUrl("OmniLwcCompile"),
 			); err != nil {
-				log.Fatalf("Failed loading OmniScript compilation page: %v", err)
+				return fmt.Errorf("Failed loading OmniScript compilation page: %w", err)
 			}
 		STATUS:
 			for {
@@ -166,7 +183,7 @@ func compileOSAndFlexCards() {
 					chromedp.WaitVisible("#compiler-message"),
 					chromedp.Text("#compiler-message", &currentStatus),
 				); err != nil {
-					log.Fatalf("Failed checking OmniScript compilation status: %v", err)
+					return fmt.Errorf("Failed checking OmniScript compilation status: %w", err)
 				}
 				switch {
 				case currentStatus == "DONE":
@@ -194,13 +211,14 @@ func compileOSAndFlexCards() {
 		var currentStatus, jsonError string
 
 		timeoutCtx, cancelParse := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancelParse()
 		loadTimeCtx, cancelLoad := context.WithTimeout(timeoutCtx, 30*time.Second)
-		defer cancel()
+		defer cancelLoad()
 		if err := chromedp.Run(loadTimeCtx,
 			chromedp.Navigate(flexCardCompilePage),
 			waitForUrl("FlexCardCompilePage"),
 		); err != nil {
-			log.Fatalf("Failed loading Flex Card compilation page: %v", err)
+			return fmt.Errorf("Failed loading Flex Card compilation page: %w", err)
 		}
 	CARD:
 		for {
@@ -210,7 +228,7 @@ func compileOSAndFlexCards() {
 				chromedp.WaitVisible("#resultJSON-0"),
 				chromedp.Text("#resultJSON-0", &jsonError),
 			); err != nil {
-				log.Fatalf("Failed checking Flex Card compilation status: %v", err)
+				return fmt.Errorf("Failed checking Flex Card compilation status: %w", err)
 			}
 			switch {
 			case currentStatus == "DONE SUCCESSFULLY":
@@ -226,8 +244,12 @@ func compileOSAndFlexCards() {
 		cancelLoad()
 		cancelParse()
 	}
+	return nil
 }
 
 func main() {
-	compileOSAndFlexCards()
+	err := compileOSAndFlexCards()
+	if err != nil {
+		log.Fatalf("Failed to reactivate omnistudio components: %v", err)
+	}
 }
