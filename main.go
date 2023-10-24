@@ -208,38 +208,46 @@ func compileOSAndFlexCards() error {
 		log.Printf("Activating FlexCards %+v\n", flexCardIds)
 		flexCardCompilePage := instanceUrl + "/apex/" + packageNamespace + "FlexCardCompilePage?id=" + strings.Join(flexCardIds, ",")
 		log.Println("Loading", flexCardCompilePage)
-		var currentStatus, jsonError string
+		var currentStatus, jsonError, auraError string
 
 		timeoutCtx, cancelParse := context.WithTimeout(ctx, 5*time.Minute)
 		defer cancelParse()
 		loadTimeCtx, cancelLoad := context.WithTimeout(timeoutCtx, 30*time.Second)
 		defer cancelLoad()
-		if err := chromedp.Run(loadTimeCtx,
-			chromedp.Navigate(flexCardCompilePage),
-			waitForUrl("FlexCardCompilePage"),
-		); err != nil {
-			return fmt.Errorf("Failed loading Flex Card compilation page: %w", err)
-		}
-	CARD:
+	CARDS:
 		for {
-			if err := chromedp.Run(timeoutCtx,
-				chromedp.WaitVisible("#compileMessage-0"),
-				chromedp.Text("#compileMessage-0", &currentStatus),
-				chromedp.WaitVisible("#resultJSON-0"),
-				chromedp.Text("#resultJSON-0", &jsonError),
+			if err := chromedp.Run(loadTimeCtx,
+				chromedp.Navigate(flexCardCompilePage),
+				waitForUrl("FlexCardCompilePage"),
 			); err != nil {
-				return fmt.Errorf("Failed checking Flex Card compilation status: %w", err)
+				return fmt.Errorf("Failed loading Flex Card compilation page: %w", err)
 			}
-			switch {
-			case currentStatus == "DONE SUCCESSFULLY":
-				log.Println("LWC Activated successfully")
-				break CARD
-			case currentStatus == "DONE WITH ERRORS":
-				log.Println("LWC FlexCards Compilation Error Result:" + jsonError)
-			default:
-				log.Println("Status: " + currentStatus)
+		CARD_STATUS:
+			for {
+				if err := chromedp.Run(timeoutCtx,
+					chromedp.WaitVisible("#compileMessage-0"),
+					chromedp.Text("#compileMessage-0", &currentStatus),
+					chromedp.WaitVisible("#resultJSON-0"),
+					chromedp.Text("#resultJSON-0", &jsonError),
+					chromedp.WaitVisible("body > #auraErrorMessage"),
+					chromedp.Text("body > #auraErrorMessage", &auraError),
+				); err != nil {
+					return fmt.Errorf("Failed checking Flex Card compilation status: %w", err)
+				}
+				switch {
+				case auraError != "":
+					log.Println("Error on page: " + auraError + "; Reloading")
+					break CARD_STATUS
+				case currentStatus == "DONE SUCCESSFULLY":
+					log.Println("LWC Activated successfully")
+					break CARDS
+				case currentStatus == "DONE WITH ERRORS":
+					log.Println("LWC FlexCards Compilation Error Result:" + jsonError)
+				default:
+					log.Println("Status: " + currentStatus)
+				}
+				time.Sleep(2 * time.Second)
 			}
-			time.Sleep(2 * time.Second)
 		}
 		cancelLoad()
 		cancelParse()
