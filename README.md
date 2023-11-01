@@ -1,6 +1,6 @@
 # Reactivate OmniStudio OmniScripts and Flex Cards
 
-Port of node puppeteer script to generate LWC components for OmniStudio
+Port of node [puppeteer script](https://github.com/vlocityinc/vlocity_build/blob/e9b4caa2e5a21ed669aa543a3250c067dc961692/lib/datapacktypes/omniscript.js#L294) to generate LWC components for OmniStudio
 OmniScripts and FlexCards to Go and chromedp.
 
 The active [force CLI](https://github.com/ForceCLI/force) login is used, so log
